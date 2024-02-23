@@ -47,7 +47,7 @@ func resizeHandler(w http.ResponseWriter, r *http.Request) {
 	// Fetch the image from URL
 	resp, err := http.Get(imageUrl)
 	if err != nil {
-		http.Error(w, "Error fetching image"+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Error fetching image " + err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer resp.Body.Close()
@@ -55,7 +55,7 @@ func resizeHandler(w http.ResponseWriter, r *http.Request) {
 	// Decode the image
 	img, format, err := image.Decode(resp.Body)
 	if err != nil {
-		http.Error(w, "Error decoding image"+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Error decoding image " + err.Error() + " url: " + imageUrl, http.StatusInternalServerError)
 		return
 	}
 
