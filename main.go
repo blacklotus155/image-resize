@@ -8,16 +8,23 @@ import (
 	"image/png"
 	_ "image/png"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 
 	// "github.com/kolesa-team/go-webp/encoder"
 	// "github.com/kolesa-team/go-webp/webp"
 	"github.com/chai2010/webp"
+	"github.com/joho/godotenv"
 	"github.com/nfnt/resize"
 )
 
 func main() {
+	err := godotenv.Load(".env")
+	if err != nil {
+		panic("Error loading .env file: " + err.Error())
+	}
+
 	http.HandleFunc("/", resizeHandler)
 	fmt.Println("Server started on port 8080")
 	http.ListenAndServe(":8080", nil)
@@ -33,7 +40,7 @@ func resizeHandler(w http.ResponseWriter, r *http.Request) {
 	objectKey := strings.Join(parts[2:], "/")
 	bucket := parts[1]
 
-	baseURL := "https://images.baleomol.com/"
+	baseURL := os.Getenv("BASE_URL")
 	imageUrl := baseURL + bucket + "/" + objectKey
 
 	// Fetch the image from URL
