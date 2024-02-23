@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"image"
+	"image/draw"
 	"image/jpeg"
 	_ "image/jpeg"
 	"image/png"
@@ -104,6 +105,23 @@ func resizeHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Resize the image
 	resizedImg := resize.Resize(uint(defaultWidth), uint(defaultHeight), img, resize.Lanczos3)
+
+	if strings.Contains(objectKey, "uploads/charge_submission") {
+		wmImage, err := os.Open("watermark.png")
+		if err != nil {
+			panic(err)
+		}
+		wm, err := png.Decode(wmImage)
+		if err != nil {
+			panic(err)
+		}
+		defer wmImage.Close()
+
+		newImage := image.NewRGBA(resizedImg.Bounds())
+		draw.Draw(newImage, newImage.Bounds(), resizedImg, image.Point{}, draw.Src)
+		draw.Draw(newImage, wm.Bounds(), wm, image.Point{}, draw.Over)
+		resizedImg = newImage
+	}
 
 	// Determine content type
 	var contentType string
