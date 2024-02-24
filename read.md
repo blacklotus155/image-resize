@@ -1,4 +1,5 @@
 enable CGO
+go env -w CGO_ENABLED=1
 go build main.go
 
 create service
