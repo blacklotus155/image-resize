@@ -1,5 +1,10 @@
 enable CGO
+
 go env -w CGO_ENABLED=1
+exec: "gcc": executable file not found in %PATH% when trying go build
+windows: https://jmeubank.github.io/tdm-gcc/
+linux: apt-get install build-essential
+
 go build main.go
 
 create service
