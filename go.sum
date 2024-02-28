@@ -1,6 +1,8 @@
 github.com/chai2010/webp v1.1.1 h1:jTRmEccAJ4MGrhFOrPMpNGIJ/eybIgwKpcACsrTEapk=
 github.com/chai2010/webp v1.1.1/go.mod h1:0XVwvZWdjjdxpUEIf7b9g9VkHFnInUSYujwqTLEuldU=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
+github.com/gorilla/mux v1.8.1 h1:TuBL49tXwgrFYWhqrNgrUNEY92u81SPhu7sTdzQEiWY=
+github.com/gorilla/mux v1.8.1/go.mod h1:AKf9I4AEqPTmMytcMc0KkNouC66V3BtZ4qD5fmWSiMQ=
 github.com/harukasan/go-libwebp v0.0.0-20220408054828-61eedf90d768 h1:6kHMeZ8a/fyiHlsR4fwBWaVh3KSBgsMrupXAA5pChfc=
 github.com/harukasan/go-libwebp v0.0.0-20220408054828-61eedf90d768/go.mod h1:ldE44ycRKJi6dVHIWnbUlEJqHQUhK5gJ4TKIfAwFbCg=
 github.com/joho/godotenv v1.5.1 h1:7eLL/+HRGLY0ldzfGMeQkb7vMd0as4CfYvUVzLqw0N0=

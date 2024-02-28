@@ -16,6 +16,7 @@ import (
 	// "github.com/kolesa-team/go-webp/encoder"
 	// "github.com/kolesa-team/go-webp/webp"
 	"github.com/chai2010/webp"
+	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
 	"github.com/nfnt/resize"
 )
@@ -26,9 +27,14 @@ func main() {
 		panic("Error loading .env file: " + err.Error())
 	}
 
-	http.HandleFunc("/", resizeHandler)
+	// http.HandleFunc("/", resizeHandler)
+	// fmt.Println("Server started on port 8080")
+	// http.ListenAndServe(":8080", nil)
+	r := mux.NewRouter()
+	r.PathPrefix("/").HandlerFunc(resizeHandler)
+	http.Handle("/", r)
 	fmt.Println("Server started on port 8080")
-	http.ListenAndServe(":8080", nil)
+	http.ListenAndServe(":8080", r)
 }
 
 func resizeHandler(w http.ResponseWriter, r *http.Request) {
@@ -40,6 +46,12 @@ func resizeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	objectKey := strings.Join(parts[2:], "/")
 	bucket := parts[1]
+
+	if strings.ToLower(bucket)== "staging" {
+		bucket = os.Getenv("BUCKET_STAGING_NAME")
+	} else if strings.ToLower(bucket) == "production" {
+		bucket = os.Getenv("BUCKET_PRODUCTION_NAME")
+	}
 
 	baseURL := os.Getenv("BASE_URL")
 	imageUrl := baseURL + bucket + "/" + objectKey
@@ -55,7 +67,7 @@ func resizeHandler(w http.ResponseWriter, r *http.Request) {
 	// Decode the image
 	img, format, err := image.Decode(resp.Body)
 	if err != nil {
-		http.Error(w, "Error decoding image " + err.Error() + " url: " + imageUrl + "object" + objectKey, http.StatusInternalServerError)
+		http.Error(w, "Error decoding image " + err.Error() + " url: "+imageUrl, http.StatusInternalServerError)
 		return
 	}
 
