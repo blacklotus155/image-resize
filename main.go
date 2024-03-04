@@ -2,23 +2,20 @@ package main
 
 import (
 	"fmt"
-	"image"
-	"image/draw"
-	"image/jpeg"
+
 	_ "image/jpeg"
-	"image/png"
 	_ "image/png"
+	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
-	// "github.com/kolesa-team/go-webp/encoder"
-	// "github.com/kolesa-team/go-webp/webp"
-	"github.com/chai2010/webp"
 	"github.com/gorilla/mux"
+	"github.com/h2non/bimg"
 	"github.com/joho/godotenv"
-	"github.com/nfnt/resize"
 )
 
 func main() {
@@ -27,17 +24,83 @@ func main() {
 		panic("Error loading .env file: " + err.Error())
 	}
 
-	// http.HandleFunc("/", resizeHandler)
-	// fmt.Println("Server started on port 8080")
-	// http.ListenAndServe(":8080", nil)
-	r := mux.NewRouter()
+	cleanupInterval := time.Hour * 24 * 7 // One week
+	directory := os.Getenv("BUCKET_STAGING_NAME")
+	directory2 := os.Getenv("BUCKET_PRODUCTION_NAME")
+	// Start a background process to delete the directory every week
+	go func() {
+		ticker := time.NewTicker(cleanupInterval)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			err := removeAll(directory)
+			if err != nil {
+				fmt.Println("Error:", err)
+			}
+			fmt.Println("Directory", directory, "and its contents have been deleted.")
+
+			err = removeAll(directory2)
+			if err != nil {
+				fmt.Println("Error:", err)
+			}
+			fmt.Println("Directory", directory2, "and its contents have been deleted.")
+		}
+	}()
+
+	r := mux.NewRouter().SkipClean(true)
+	r.HandleFunc("/favicon.ico", faviconHandler)
 	r.PathPrefix("/").HandlerFunc(resizeHandler)
 	http.Handle("/", r)
 	fmt.Println("Server started on port 8080")
 	http.ListenAndServe(":8080", r)
 }
 
+func faviconHandler(w http.ResponseWriter, r *http.Request) {
+	http.ServeFile(w, r, "./favicon.ico")
+}
+
+func setImageSize(imgWidth, imgHeight int, widthStr, heightStr string) (width, height int) {
+	defaultWidth := imgWidth
+	defaultHeight := imgHeight
+	var err error
+
+	if widthStr != "" && heightStr == "" {
+		defaultWidth, err = strconv.Atoi(widthStr)
+		if err != nil || defaultWidth <= 0 {
+			defaultWidth = imgWidth
+		}
+		defaultHeight = (defaultWidth / imgWidth) * imgHeight
+	}
+	if heightStr != "" {
+		defaultHeight, err = strconv.Atoi(heightStr)
+		if err != nil || defaultHeight <= 0 {
+			defaultHeight = imgHeight
+		}
+		defaultWidth = (defaultHeight / imgHeight) * imgWidth
+	}
+	if heightStr != "" && widthStr != "" {
+		defaultHeight, err = strconv.Atoi(heightStr)
+		if err != nil || defaultHeight <= 0 {
+			defaultHeight = imgHeight
+		}
+		defaultWidth, err = strconv.Atoi(widthStr)
+		if err != nil || defaultWidth <= 0 {
+			defaultWidth = imgWidth
+		}
+	}
+
+	return defaultWidth, defaultHeight
+}
+
 func resizeHandler(w http.ResponseWriter, r *http.Request) {
+	// Parse provided width and height from query parameters
+	widthStr := r.URL.Query().Get("width")
+	heightStr := r.URL.Query().Get("height")
+	formatStr := r.URL.Query().Get("format")
+	wStr := r.URL.Query().Get("w")
+	hStr := r.URL.Query().Get("h")
+	isNeedWatermark := r.URL.Query().Get("watermark")
+
 	// Extract image path from URL
 	parts := strings.Split(r.URL.Path, "/")
 	if len(parts) < 2 {
@@ -47,133 +110,147 @@ func resizeHandler(w http.ResponseWriter, r *http.Request) {
 	objectKey := strings.Join(parts[2:], "/")
 	bucket := parts[1]
 
-	if strings.ToLower(bucket)== "staging" {
+	if strings.ToLower(bucket) == "staging" {
 		bucket = os.Getenv("BUCKET_STAGING_NAME")
 	} else if strings.ToLower(bucket) == "production" {
 		bucket = os.Getenv("BUCKET_PRODUCTION_NAME")
 	}
-
 	baseURL := os.Getenv("BASE_URL")
-	imageUrl := baseURL + bucket + "/" + objectKey
+	filePath := bucket + "/" + objectKey
+	imageUrl := baseURL + filePath
 
-	// Fetch the image from URL
-	resp, err := http.Get(imageUrl)
+	// Check if the file exists
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		// Fetch the image from URL
+		resp, err := http.Get(imageUrl)
+		if err != nil {
+			http.Error(w, "Error fetching image "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer resp.Body.Close()
+
+		// Check if the response status code indicates success
+		if resp.StatusCode != http.StatusOK {
+			http.Error(w, "Failed to retrieve the image. ", http.StatusNotFound)
+			return
+		}
+
+		directory := filepath.Dir(filePath)
+		if err := os.MkdirAll(directory, 0755); err != nil {
+			http.Error(w, "Error creating output directory:"+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// Create the output file
+		outputFile, err := os.Create(filePath)
+		if err != nil {
+			http.Error(w, "Error creating the output file:"+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer outputFile.Close()
+
+		// Copy the response body to the output file
+		_, err = io.Copy(outputFile, resp.Body)
+		if err != nil {
+			http.Error(w, "Error copying image data to file:"+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Read image file
+	buffer, err := bimg.Read(filePath)
 	if err != nil {
-		http.Error(w, "Error fetching image " + err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Error read image", http.StatusInternalServerError)
 		return
 	}
-	defer resp.Body.Close()
 
-	// Decode the image
-	img, format, err := image.Decode(resp.Body)
+	metadata, err := bimg.NewImage(buffer).Metadata()
 	if err != nil {
-		http.Error(w, "Error decoding image " + err.Error() + " url: "+imageUrl, http.StatusInternalServerError)
+		http.Error(w, "Error read metadata image", http.StatusInternalServerError)
 		return
 	}
-
 	// Determine image dimensions
-	imgWidth := img.Bounds().Dx()
-	imgHeight := img.Bounds().Dy()
+	imgWidth := metadata.Size.Width
+	imgHeight := metadata.Size.Height
+	imgFormat := metadata.Type
 
-	// Parse provided width and height from query parameters
-	widthStr := r.URL.Query().Get("width")
-	heightStr := r.URL.Query().Get("height")
-	formatStr := r.URL.Query().Get("format")
-	wStr := r.URL.Query().Get("w")
-	hStr := r.URL.Query().Get("h")
+	// add watermarks to image
+	if strings.Contains(objectKey, "uploads/charge_submission") || isNeedWatermark == "true" {
+		if imgFormat != "jpeg" {
+			buffer, err = bimg.NewImage(buffer).Convert(bimg.JPEG)
+			if err != nil {
+				http.Error(w, "Error converting image"+err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+		watermark := bimg.Watermark{
+			Text:       "Baleomol.com",
+			Opacity:    0.8,
+			Width:      120,
+			DPI:        150,
+			Margin:     100,
+			Font:       "sans bold 12",
+			Background: bimg.Color{255, 255, 255},
+		}
+		buffer, err = bimg.NewImage(buffer).Watermark(watermark)
+		if err != nil {
+			http.Error(w, "Error adding watermark"+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
 
 	// Set default values based on image size
 	defaultWidth := imgWidth
 	defaultHeight := imgHeight
 
 	// Parse provided width and height
-	if widthStr != "" {
-		defaultWidth, err = strconv.Atoi(widthStr)
-		if err != nil || defaultWidth <= 0 {
-			defaultWidth = imgWidth
-		}
-	}
-	if heightStr != "" {
-		defaultHeight, err = strconv.Atoi(heightStr)
-		if err != nil || defaultHeight <= 0 {
-			defaultHeight = imgHeight
-		}
-	}
-	if wStr != "" {
-		defaultWidth, err = strconv.Atoi(wStr)
-		if err != nil || defaultWidth <= 0 {
-			defaultWidth = imgWidth
-		}
-	}
-	if hStr != "" {
-		defaultHeight, err = strconv.Atoi(hStr)
-		if err != nil || defaultHeight <= 0 {
-			defaultHeight = imgHeight
-		}
-	}
+	defaultWidth, defaultHeight = setImageSize(imgWidth, imgHeight, widthStr, heightStr)
+	defaultWidth, defaultHeight = setImageSize(defaultWidth, defaultHeight, wStr, hStr)
+
 	if formatStr != "" {
-		format = formatStr
+		imgFormat = formatStr
 	}
 
-	// Resize the image
-	resizedImg := resize.Resize(uint(defaultWidth), uint(defaultHeight), img, resize.Lanczos3)
-
-	if strings.Contains(objectKey, "uploads/charge_submission") {
-		wmImage, err := os.Open("watermark.png")
-		if err != nil {
-			panic(err)
-		}
-		wm, err := png.Decode(wmImage)
-		if err != nil {
-			panic(err)
-		}
-		defer wmImage.Close()
-
-		newImage := image.NewRGBA(resizedImg.Bounds())
-		draw.Draw(newImage, newImage.Bounds(), resizedImg, image.Point{}, draw.Src)
-		draw.Draw(newImage, wm.Bounds(), wm, image.Point{}, draw.Over)
-		resizedImg = newImage
-	}
-
-	// Determine content type
-	var contentType string
-	switch format {
-	case "jpeg":
-		contentType = "image/jpeg"
+	var extension bimg.ImageType
+	switch imgFormat {
 	case "png":
-		contentType = "image/png"
+		extension = bimg.PNG
 	case "webp":
-		contentType = "image/webp"
+		extension = bimg.WEBP
 	default:
-		contentType = "image/jpeg"
+		extension = bimg.JPEG
 	}
 
-	// Set content type header
-	w.Header().Set("Content-Type", contentType)
-
-	// Encode the resized image
-	switch contentType {
-	case "image/jpeg":
-		err = jpeg.Encode(w, resizedImg, nil)
-	case "image/png":
-		err = png.Encode(w, resizedImg)
-	case "image/webp":
-		var data []byte
-		data, err = webp.EncodeLosslessRGB(resizedImg)
-		_, err = w.Write(data)
-
-		// err = webp.encode(w, m, &webp.Options{Lossless: true})
-		// options, err := encoder.NewLossyEncoderOptions(encoder.PresetDefault, 75)
-		// if err != nil {
-		// 	http.Error(w, "Failed create options", http.StatusInternalServerError)
-		// 	return
-		// }
-		// err = webp.Encode(w, resizedImg, options)
-	default:
-		err = jpeg.Encode(w, resizedImg, nil)
-	}
-	if err != nil {
-		http.Error(w, "Error encoding image", http.StatusInternalServerError)
+	if !bimg.IsTypeNameSupported(imgFormat) {
+		http.Error(w, "Error image type unsupported", http.StatusInternalServerError)
 		return
 	}
+
+	contentType := "image/" + bimg.ImageTypeName(extension)
+	// process options
+	options := bimg.Options{
+		Width:       defaultWidth,
+		Height:      defaultHeight,
+		Compression: 8,
+		Type:        extension,
+	}
+	// Encode the resized image
+	buffer, err = bimg.NewImage(buffer).Process(options)
+	if err != nil {
+		http.Error(w, "Error processing image"+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	// Set content type header
+	w.Header().Set("Content-Type", contentType)
+	_, err = w.Write(buffer)
+
+	if err != nil {
+		http.Error(w, "Error serve image", http.StatusInternalServerError)
+		return
+	}
+}
+
+func removeAll(directory string) error {
+	err := os.RemoveAll(directory)
+	return err
 }
